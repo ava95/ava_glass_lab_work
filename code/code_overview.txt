@@ -1,3 +1,13 @@
-Pipeline 00
-- Run initial EDA on [name of file]
-- Combine 
+Pipeline 00: Preprocessing
+- Run initial EDA on miRNAs [name of file]
+- Update 
+
+Pipeline 01: Single sample networks
+- Construct single sample networks
+- Analyze normality and other aspects
+
+Pipeline 02: Regression
+- Run and analyze regression analysis on P2L and L2P networks
+
+Pipepline 03: Functional Enrichment
+- Analyze functional enrichment of 
