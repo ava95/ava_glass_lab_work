@@ -5,3 +5,4 @@ old_bad_code/
 __pycache__/
 corr_network.png
 .Rhistory
+.DS_Store

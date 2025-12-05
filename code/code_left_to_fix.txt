@@ -1,0 +1,9 @@
+pipeline00.1_eda_and_preprocess
+00run_panda_review.qmd
+edge_normality
+deseq
+lioness_correlation_analysis
+edge_normality
+go_enrichment_gsea
+target_enrichment_gsea
+p2l_vs_l2p

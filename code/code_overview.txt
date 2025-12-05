@@ -1,0 +1,3 @@
+Pipeline 00
+- Run initial EDA on [name of file]
+- Combine 

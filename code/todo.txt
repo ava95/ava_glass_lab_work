@@ -21,8 +21,6 @@ miRNA x miRNA
 
 
 
-
-
 Readings
 A Network Approach to Wound Healing. Adv Wound Care (New Rochelle). 2013;2(9):499-509. 
 Sexually-dimorphic targeting of functionally-related genes in COPD. BMC systems biology. 2014;8:118. 
@@ -39,8 +37,6 @@ Identification and isolation of a dermal lineage with intrinsic fibrogenic poten
 Passing messages between biological networks to refine predicted interactions. PLoS One. 2013;8(5):e64832. 
 Estimating Sample-Specific Regulatory Networks. iScience. 2019;14:226-240. 
 Understanding Tissue-Specific Gene Regulation. Cell Rep. 2017;21(4):1077-1088
-
-
 
 
 
