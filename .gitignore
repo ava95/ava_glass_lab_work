@@ -1,0 +1,7 @@
+data/
+old_bad_code/
+.vscode/
+.ipynb_checkpoints/
+__pycache__/
+corr_network.png
+.Rhistory
