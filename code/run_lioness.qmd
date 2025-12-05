@@ -1,0 +1,575 @@
+---
+title: "lioness_mirna_analysis"
+format: html
+editor: visual
+---
+
+```{r}
+library(GEOquery)
+library(dplyr)
+```
+
+```{r}
+geo_data <- readRDS("~/Documents/Glass_Lab/geo_data.rds")
+pheno_df <- readRDS("~/Documents/Glass_Lab/pheno_df.rds")
+results <- readRDS("~/Documents/Glass_Lab/data/results.rds")
+comp_df <- readRDS("~/Documents/Glass_Lab/comp_df.rds")
+comp_df_fev <- readRDS("~/Documents/Glass_Lab/comp_df_fev.rds")
+comp_df_fev_subset <- readRDS("~/Documents/Glass_Lab/comp_df_fev_subset.rds")
+comp_df_fev_good <- readRDS("~/Documents/Glass_Lab/comp_df_fev_good.rds")
+```
+
+```{r}
+miRNA_df <- read.csv("~/Documents/Glass_Lab/LGRC_miRNA/GSE201121_microRNA_normalized.txt", sep="\t", row.names=NULL)
+```
+
+```{r}
+input_df <- miRNA_df |>
+  select(-Chrom, -Start, -Stop, -Strand, -miRBase_Version, -Name)
+
+row.names(input_df) <- input_df$Mature_ID
+
+input_df <- input_df |>
+  select(-Mature_ID)
+
+for (col in colnames(input_df)) {
+  if (grepl("_HiSeq", col)) {
+    colname <- substr(col, 1, nchar(col) - 6)
+    input_df$colname <- input_df$col
+    input_df <- input_df |>
+      select(-col)
+  }
+  
+  if (endsWith(col,".2")) {
+    colname <- substr(col, 1, nchar(col) - 2)
+    input_df$colname <- input_df$col
+    input_df <- input_df |>
+      select(-col)
+  }
+  }
+
+
+# saveRDS(input_df, file="~/Documents/Glass_Lab/input_df.rds")
+```
+
+```{r}
+# geo_data <- getGEO("GSE201121")
+# geo_data <- saveRDS(geo_data, "~/Documents/Glass_Lab/geo_data.rds")
+
+pheno_df_1 <- geo_data[[1]]@phenoData@data
+pheno_df_2 <- geo_data[[2]]@phenoData@data
+
+pheno_df <- rbind(pheno_df_2, pheno_df_1)
+
+```
+
+```{r}
+
+pheno_df <- pheno_df |>
+  dplyr::select(-status, -submission_date, -last_update_date, -type, -channel_count, -contact_email, -contact_name, -contact_institute, -contact_address, -contact_city, -contact_state, -data_row_count, -contact_country)
+
+new_values <- list()
+new_colnames <- c()
+
+
+for (colname in names(pheno_df)) {
+  col <- pheno_df[[colname]]
+  first_val <- as.character(col[1])
+  # Check for : in the first value
+  if (grepl(":", first_val, fixed = TRUE)) {
+    # Split all values by ':'
+    split_vals <- strsplit(as.character(col), ":", fixed = TRUE)
+    # New column name is the first element of the split of the first row
+    new_name <- split_vals[[1]][1]
+    # Values are always the second element
+    vals <- sapply(split_vals, function(y) trimws(y[2]))
+    new_values[[new_name]] <- vals
+    new_colnames <- c(new_colnames, new_name)
+  } else {
+    # Keep unchanged
+    new_values[[colname]] <- col
+    new_colnames <- c(new_colnames, colname)
+  }
+}
+
+pheno_df <- as.data.frame(new_values, stringsAsFactors = FALSE)
+
+cols_to_numeric <- c("age", "pack.years","fev1.percent.predicted", "fev1.fvc.ratio", "bode.score")
+
+for (col in cols_to_numeric) {
+  if (col %in% names(pheno_df)) {
+    pheno_df[[col]] <- as.numeric(pheno_df[[col]])
+  }
+}
+
+pheno_df$title <- sapply(pheno_df$title, function(col) strsplit(as.character(col), "-", fixed=TRUE)[[1]][1])
+
+saveRDS(pheno_df, "~/Documents/Glass_Lab/pheno_df.rds")
+```
+
+```{Data Overview - miRNA}
+```
+
+```{r}
+# Summary of column (sample) expression level.
+# Seems to indicate miRNAs with mostly low expression but
+# high expression across samples in particular miRNAs
+print("Summary of sample expression")
+summary(input_df[,1:5])
+
+# Summary of row (miRNA) expression levels
+# Expression can vary somewhat across samples but seems to stay
+# generally consistent
+print("Summary of miRNA expression")
+summary(t(input_df)[,1:5])
+
+# Average expression levels of each miRNA
+print("Average expression level of each miRNA")
+summary(rowMeans(input_df))
+hist(rowMeans(input_df))
+
+filtered_df <- input_df[rowSums(input_df) != 0,]
+hist(rowMeans(filtered_df))
+
+# Average expression levels of miRNA in each sample
+print("Average expression level of overall miRNA within each sample")
+summary(colMeans(input_df))
+hist(colMeans(input_df))
+
+filtered_df <- input_df[rowSums(input_df) != 0,]
+hist(colMeans(filtered_df))
+
+# Empty columns (samples with no miRNA)
+print("Samples with no miRNA")
+sum(colSums(input_df) == 0)
+
+# Empty rows (number of miRNAs not found in any sample)
+print("miRNA with no expression in any samples")
+sum(rowSums(input_df) == 0)
+
+# Determine how many 0 values in samples each miRNA has
+hist(rowSums(input_df == 0))
+
+# Determine how many 0 miRNA values each column has
+hist(colSums(input_df == 0))
+```
+
+```{Data Overview - Phenotypes}
+```
+
+```{r}
+# Sex distribution
+table(pheno_df$gender)
+
+# Diagnosis counts
+table(pheno_df$disease)
+
+# Smoking
+hist(as.numeric(pheno_df$pack.years), main="Pack Years")
+
+# Age distribution
+hist(as.numeric(pheno_df$age), main = "Age")
+
+# Age distribution by diagnosis
+hist(pheno_df[pheno_df$disease == "2-COPD/Emphysema",]$age, main = "COPD by Age")
+hist(pheno_df[pheno_df$disease == "3-Control",]$age, main = "Control by Age")
+
+print("COPD by Age")
+summary(pheno_df[pheno_df$disease == "2-COPD/Emphysema",]$age)
+
+print("Control by Age")
+summary(pheno_df[pheno_df$disease == "3-Control",]$age)
+
+# Age by sex
+print("Age by Sex - Male")
+summary(pheno_df[pheno_df$gender == "Male",]$age)
+print("Age by Sex - Female")
+summary(pheno_df[pheno_df$gender.ch1 == "Female",]$age)
+
+# Diagnosis by sex
+print("Diagnosis in Males")
+table(pheno_df[pheno_df$gender == "Male",]$disease)
+print("Diagnosis in Females")
+table(pheno_df[pheno_df$gender == "Female",]$disease)
+
+# COPD by packyears
+hist(pheno_df[pheno_df$disease == "2-COPD/Emphysema",]$pack.years)
+hist(pheno_df[pheno_df$disease == "3-Control",]$pack.years)
+
+# Sum of how many tissues in input_df for which we have phenotype data
+print("We have phenotype data for this many tissues:")
+sum(colnames(input_df) %in% pheno_df$title)
+```
+
+```{Analysis}
+```
+
+```         
+```
+
+```{r}
+hist(pheno_df$fev1.percent.predicted)
+```
+
+```{r}
+# Remove miRNAs with no expression
+input_df <- input_df[rowSums(input_df) != 0,]
+
+# Remove miRNAs expressed in fewer than 90% of samples.
+input_df_filtered <- input_df[rowSums(input_df != 0) > (.9*ncol(input_df)),]
+```
+
+```{r}
+# List of sample IDs that are cases and controls
+case_tissue_list <- pheno_df[which(pheno_df$disease == "2-COPD/Emphysema"),]$title
+ctrl_tissue_list <- pheno_df[which(pheno_df$disease == "3-Control"),]$title
+
+case_input_df <- input_df[,which(colnames(input_df_filtered) %in% case_tissue_list)]
+ctrl_input_df <- input_df[,which(colnames(input_df_filtered) %in% ctrl_tissue_list)]
+```
+
+```{r}
+
+# # WRITE RESULTS TO RDS
+# ncols <- ncol(input_df)
+# big_network <- cor(t(input_df))
+# 
+# 
+# results <- lapply(seq(1, ncols), function(i) {
+#   ncols * big_network - (ncols - 1) * cor(t(input_df[,-i]))
+# })
+# 
+# names(results) <- colnames(input_df)
+# 
+# saveRDS(results, "~/Documents/Glass_Lab/results.RDS")
+```
+
+```{r}
+# For all of the interactions (e.g. MI0000809_MIMAT0000757 with MI0017294_MIMAT0019738),
+# get a vector of all of their Pearson scores in the cases, and a vector of all their Pearson
+# scores in the controls, and then compare. 
+
+results <- readRDS("~/Documents/Glass_Lab/results.RDS")
+case_results <- results[which(colnames(input_df_filtered) %in% case_tissue_list)]
+names(case_results) <- colnames(input_df_filtered)[colnames(input_df_filtered) %in% case_tissue_list]
+ctrl_results <- results[which(colnames(input_df_filtered) %in% ctrl_tissue_list)]
+names(ctrl_results) <- colnames(input_df_filtered)[colnames(input_df_filtered) %in% ctrl_tissue_list]
+
+
+```
+
+```{r}
+
+# # MAKE COMP_DF -- WRITTEN TO RDS ALREADY
+# # 
+# # Assess p-value of miRNA-miRNA co-expression in case vs control.
+# row_names <- row.names(input_df)
+# 
+# n_comparisons <- (nrow(input_df_filtered) * (nrow(input_df_filtered) - 1)) / 2
+# 
+# comp_df <- data.frame(name1 = character(n_comparisons), name2 = character(n_comparisons), pvalue = character(n_comparisons), t = character(n_comparisons))
+# 
+# # There's definitely a faster way to do this ... sapply
+# row_counter = 1
+# for (i in 1:(length(row_names)-1)) {
+#   print(row_names[i])
+#   for (j in (i+1):length(row_names)) {
+#     name1 <- row_names[i]
+#     name2 <- row_names[j]
+#     if (name1 != name2) {
+# 
+#         extracted_case_test <-  lapply(case_results, function(x) x[name1, name2])
+# 
+#         extracted_ctrl_test <- lapply(ctrl_results, function(x) x[name1, name2])
+# 
+#         ttest <- t.test(unlist(extracted_case_test), unlist(extracted_ctrl_test))
+# 
+#         comp_df[row_counter,] <- list(name1, name2, ttest$p.value, ttest$parameter)
+# 
+#         row_counter <- row_counter + 1
+# 
+# 
+#     }
+#   }
+# }
+# saveRDS(comp_df, "~/Documents/Glass_Lab/comp_df.rds")
+
+```
+
+```{r}
+
+comp_df$adjusted_pvalue <- p.adjust(comp_df$pvalue, method = "BH")
+
+interesting_results <- comp_df |>
+  filter(adjusted_pvalue < 0.05)
+
+sum(comp_df$pvalue < 0.05)
+```
+
+```{r}
+hist(as.numeric(comp_df$pvalue), main = "P-Value, miRNA Coexpression and Case vs Control", xlab = "P-Value")
+hist(as.numeric(comp_df$t), main = "miRNA Coexpression and Case vs Control", xlab = "T Statistic")
+```
+
+```{r}
+# Assess p-value of miRNA-miRNA co-expression across fev %
+n_comparisons <- (nrow(input_df_filtered) * (nrow(input_df_filtered) - 1)) / 2
+row_names <- row.names(input_df_filtered)
+
+# comp_df_fev <- data.frame(name1 = character(n_comparisons), name2 = character(n_comparisons), pvalue = character(n_comparisons), estimate = character(n_comparisons))
+# 
+# fev <- pheno_df$fev1.percent.predicted
+# names(fev) <- pheno_df$title
+# # There's definitely a faster way to do this ... sapply
+# row_counter = 1
+# for (i in 1:(length(row_names)-1)) {
+#   print(row_names[i])
+#   for (j in (i+1):length(row_names)) {
+#     name1 <- row_names[i]
+#     name2 <- row_names[j]
+#     if (name1 != name2) {
+#         extracted <- lapply(results, function(x) x[row_names[i], row_names[j]])
+#         names(extracted) <- names(results)
+#         
+#         scores_df <- data.frame(sample = names(extracted))
+#         
+#         scores_df$strength <- extracted
+#         
+#         scores_df$fev <- fev[as.character(scores_df$sample)]
+#         
+#         cor <- cor.test(as.numeric(scores_df$strength), as.numeric(scores_df$fev))
+#         
+#         comp_df_fev[row_counter,] <- list(name1, name2, cor$p.value, cor$estimate)
+#         
+#         row_counter <- row_counter + 1
+# 
+#     }
+#   }
+# }
+# 
+# 
+# saveRDS(comp_df_fev, "~/Documents/Glass_Lab/comp_df_fev.rds")
+comp_df_fev <- readRDS("~/Documents/Glass_Lab/comp_df_fev.rds")
+
+```
+
+```{r}
+
+
+
+hist(as.numeric(comp_df_fev$pvalue), main = "FEV and miRNA Coexpression P-Value", xlab = "P-Value")
+hist(as.numeric(comp_df_fev$estimate), main = "FEV and miRNA Coexpression Correlation", xlab = "Correlation")
+
+# hist(as.numeric(comp_df_fev$adjusted_pvalue))
+```
+
+```{r}
+comp_df_fev$adjusted_pvalue <- p.adjust(comp_df_fev$pvalue, method = "BH")
+
+interesting_results <- comp_df_fev |>
+  filter(adjusted_pvalue < 0.05)
+
+
+unique(interesting_results$name1)
+unique(interesting_results$name2)
+
+union(unique(interesting_results$name1), unique(interesting_results$name2))
+```
+
+```{r}
+
+sums <- list()
+for (i in 1:364) {
+  sums[[i]] <- sum(abs(unlist(results[[i]]) > 10))
+}
+
+
+hist(as.numeric(sums), main = "Histogram of number of edges with weight > 10 per sample")
+
+which(unlist(sums) > 1000)
+
+```
+
+```{r}
+# Names of samples with more than 1000 edge weights greater than 10
+unusual_samples <- names(results[which(unlist(sums) > 1000)])
+```
+
+```{r}
+pheno_df[pheno_df$title %in% unusual_samples,]
+```
+
+```{r}
+results_subset <- results[which(unlist(sums) < 1000)]
+
+which(unlist(sums) >= 1000)
+
+names(results)[which(unlist(sums) >= 1000)]
+```
+
+```{r}
+# Run this analysis again excluding outlier samples (samples with more than 1000 absolute value correlations greater than 10)
+
+# comp_df_fev_subset <- data.frame(name1 = character(n_comparisons), name2 = character(n_comparisons), pvalue = character(n_comparisons), estimate = character(n_comparisons))
+# 
+# fev <- pheno_df$fev1.percent.predicted
+# names(fev) <- pheno_df$title
+# # There's definitely a faster way to do this ... sapply
+# row_counter = 1
+# for (i in 1:(length(row_names)-1)) {
+#   print(row_names[i])
+#   for (j in (i+1):length(row_names)) {
+#     name1 <- row_names[i]
+#     name2 <- row_names[j]
+#     if (name1 != name2) {
+#         extracted <- lapply(results_subset, function(x) x[row_names[i], row_names[j]])
+#         names(extracted) <- names(results_subset)
+#         
+#         scores_df <- data.frame(sample = names(extracted))
+#         
+#         scores_df$strength <- extracted
+#         
+#         scores_df$fev <- fev[as.character(scores_df$sample)]
+#         
+#         cor <- cor.test(as.numeric(scores_df$strength), as.numeric(scores_df$fev))
+#         
+#         comp_df_fev_subset[row_counter,] <- list(name1, name2, cor$p.value, cor$estimate)
+#         
+#         row_counter <- row_counter + 1
+# 
+#     }
+#   }
+# }
+
+
+
+```
+
+```{r}
+hist(as.numeric(comp_df_fev_subset$pvalue), main = "Filtered Samples (Edge Weight), P-Value of Correlation", xlab = "P-Value")
+hist(as.numeric(comp_df_fev_good$estimate), main = "Filtered Samples, Correlation")
+```
+
+```{r}
+comp_df_fev_subset$adjusted_pvalue <- p.adjust(comp_df_fev_subset$pvalue, method = "BH")
+
+interesting_results_subset <- comp_df_fev_subset |>
+  filter(adjusted_pvalue < 0.05)
+
+some_results <- comp_df_fev_subset[comp_df_fev_subset$pvalue < 0.001,]
+
+
+
+all_results <- c(some_results$name1, some_results$name2)
+table(all_results)[order(table(all_results))]
+
+interesting_mirnas <- table(all_results)[order(table(all_results), decreasing=TRUE)]
+
+saveRDS(comp_df_fev_subset, "~/Documents/Glass_Lab/comp_df_fev_subset.rds")
+
+```
+
+```{r}
+### EVEN SMALLER SUBSET ###
+
+# Fitler out:
+# - Samples that did not pass QC:
+
+failed_qc_names <- pheno_df[!as.logical(pheno_df$qc.pass),]$title
+
+
+outlier_names <- names(results)[which(unlist(sums) > 1000)]
+
+bad_transcripts <- union(failed_qc_names, outlier_names)
+
+# - Samples with more than 1000 absolute value correlations greater than 10
+
+good_positions <- which(!names(results) %in% bad_transcripts)
+
+good_results_subset <- results[good_positions]
+```
+
+```{r}
+
+# # n_comparisons <- (nrow(input_df_filtered) * (nrow(input_df_filtered) - 1)) / 2
+# # row_names <- row.names(input_df_filtered)
+# # 
+# # comp_df_fev_good <- data.frame(name1 = character(n_comparisons), name2 = character(n_comparisons), pvalue = character(n_comparisons), estimate = character(n_comparisons))
+# # 
+# fev <- pheno_df$fev1.percent.predicted
+# names(fev) <- pheno_df$title
+# 
+# row_counter = 1
+# for (i in 1:(length(row_names)-1)) {
+#   print(row_names[i])
+#   for (j in (i+1):length(row_names)) {
+#     name1 <- row_names[i]
+#     name2 <- row_names[j]
+#     if (name1 != name2) {
+#         extracted <- lapply(good_results_subset, function(x) x[row_names[i], row_names[j]])
+#         names(extracted) <- names(good_results_subset)
+# 
+#         scores_df <- data.frame(sample = names(extracted))
+# 
+#         scores_df$strength <- extracted
+# 
+#         scores_df$fev <- fev[as.character(scores_df$sample)]
+# 
+#         cor <- cor.test(as.numeric(scores_df$strength), as.numeric(scores_df$fev))
+# 
+#         comp_df_fev_good[row_counter,] <- list(name1, name2, cor$p.value, cor$estimate)
+# 
+#         row_counter <- row_counter + 1
+# 
+#     }
+#   }
+# }
+
+
+saveRDS(comp_df_fev_good, "~/Documents/Glass_Lab/comp_df_fev_good.rds")
+
+hist(results[[1]], main = "Edge Weights of Typical Sample (1)")
+hist(results[[89]], main = "Edge Weights of Unusual Sample (89)")
+```
+
+```{r}
+hist(as.numeric(comp_df_fev_good$pvalue), main = "Filtered Samples (Edge Weight and QC), P-Value of Correlation", xlab = "P-Value")
+
+comp_df_fev_good$adjusted_pvalue <- p.adjust(comp_df_fev_subset$pvalue, method = "BH")
+hist(comp_df_fev_good$adjusted_pvalue)
+
+sum(comp_df_fev_good$adjusted_pvalue < 0.05)
+```
+
+```{r}
+hist(rowMeans(input_df_filtered))
+
+input_df_filtered <- input_df_filtered[!colnames(input_df_filtered) %in% bad_transcripts,]
+
+```
+
+```{r}
+
+# input_df_filtered[rowMeans(input_df_filtered) < 12]
+
+input_df_filtered_flipped <- t(input_df_filtered)
+
+
+flipped <- t(input_df_filtered)
+
+
+row_ranges <- apply(input_df_filtered, 1, function(x) diff(range(x)))
+
+hist(row_ranges)
+
+
+
+```
+
+```{r}
+comp_df_fev_good_smallpval <- comp_df_fev_good[comp_df_fev_good$pvalue < 0.01,]
+miRNAs <- c(comp_df_fev_good_smallpval$name1, comp_df_fev_good_smallpval$name2)
+miRNAs_count <- table(miRNAs)[order(table(miRNAs), decreasing=TRUE)]
+
+names(miRNAs_count)[1:10]
+```

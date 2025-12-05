@@ -1,0 +1,257 @@
+---
+title: "gsea"
+format: html
+---
+```{r}
+library(dplyr)
+```
+
+
+
+```{r}
+mat_mirna_goa <- read.csv("../data/mat_mirna_goa.csv")
+edge_df <- read.csv("../data/all_merged_for_analysis.csv")
+mat_mirna_goa$mirbase_id <- mat_mirna_goa$Gene_Name
+extended_obo_lines <- readLines("/Users/ava/Documents/Glass_Lab/data/extended_go_obo.txt")
+obo_lines <- readLines("/Users/ava/Documents/Glass_Lab/data/goa.obo.txt")
+motif <- read.csv("../data/motif.txt", sep="", header=FALSE)
+
+```
+
+```{r}
+
+build_go_parent_structure <- function(obo_lines) {
+  go_parents <- list()
+  current_go <- NULL
+  
+  for (line in obo_lines) {
+    line <- trimws(line)
+    if (line == "[Term]") {
+      current_go <- NULL  # Reset for the next term
+    } else if (startsWith(line, "id: GO:")) {
+      current_go <- sub("id: ", "", line)
+      if (!is.null(current_go)) go_parents[[current_go]] <- character()
+    } else if (startsWith(line, "is_a: GO:")) {
+      parent <- sub("is_a: (GO:\\d+).*", "\\1", line)
+      go_parents[[current_go]] <- c(go_parents[[current_go]], parent)
+    }
+  }
+  
+  return(go_parents)
+}
+
+generate_go_to_description <- function(obo_lines) {
+  go_descr <- list()
+  current_go <- NULL
+  
+  for (line in obo_lines) {
+    line <- trimws(line)
+    if (line == "[Term]") {
+      current_go <- NULL  # Reset for the next term
+    } else if (startsWith(line, "id: GO:")) {
+      current_go <- sub("id: ", "", line)
+    } else if (startsWith(line, "name:")) {
+      if (!is.null(current_go)) go_descr[current_go] <- sub("name: ", "\\1", line)
+      
+    }
+  }
+  return(go_descr)
+}
+
+
+go_descr <- generate_go_to_description(extended_obo_lines)
+go_parents <- build_go_parent_structure(obo_lines)
+
+```
+
+
+```{r}
+# Preprocess mat_mirna_goa to match format of edge_df
+
+preprocess_mat_mirna_goa <- function(mat_mirna_goa) {
+  mat_mirna_goa$mirbase_id <- substr(toupper(mat_mirna_goa$mirbase_id), 5, nchar(mat_mirna_goa$mirbase_id))
+  mat_mirna_goa$mirbase_id <- ifelse(
+  (endsWith(mat_mirna_goa$mirbase_id, "-3p")) | (endsWith(mat_mirna_goa$mirbase_id, "-3P")),
+  substr(mat_mirna_goa$mirbase_id,1,nchar(mat_mirna_goa$mirbase_id)-3), mat_mirna_goa$mirbase_id)
+  
+  mat_mirna_goa$mirbase_id <- ifelse(
+  (endsWith(mat_mirna_goa$mirbase_id, "-5p")) | (endsWith(mat_mirna_goa$mirbase_id, "-5P")),
+  substr(mat_mirna_goa$mirbase_id,1,nchar(mat_mirna_goa$mirbase_id)-3), mat_mirna_goa$mirbase_id)
+
+  mat_mirna_goa$mirbase_id <- gsub("(?<=MIR)[-]", "", mat_mirna_goa$mirbase_id, perl=TRUE)
+
+  mat_mirna_goa <- mat_mirna_goa |>
+  filter(Relationship != "NOT|located_in") |>
+  filter(Relationship != "NOT|involved_in")
+  
+  return(mat_mirna_goa)
+}
+
+
+
+```
+
+```{r}
+# Check which miRNAs aren't in there
+# sum((unique(edge_df$Gene) %in% unique(mat_mirna_goa$mirbase_id)) | (substr(unique(edge_df$Gene), 1, nchar(unique(edge_df$Gene)) -2)) %in% unique(mat_mirna_goa$mirbase_id))
+# 
+# length(unique(edge_df$Gene))
+# 
+# unique(edge_df$Gene[!(unique(edge_df$Gene) %in% unique(mat_mirna_goa$mirbase_id)) & !((substr(unique(edge_df$Gene), 1, nchar(unique(edge_df$Gene)) -2)) %in% unique(mat_mirna_goa$mirbase_id))])
+```
+
+```{r}
+library(dplyr)
+
+generate_average_edge_df <- function(edge_df) {
+  avg_df <- edge_df |>
+  group_by(Gene) |>
+  summarize(mean_abs_z_score = mean(abs(z_score_combined)),
+            mean_z_score = mean(z_score_combined),
+            max_z_score = max(z_score_combined),
+            min_z_score = min(z_score_combined),
+            median_z_score = median(z_score_combined))
+  
+  return(avg_df)
+}
+
+
+avg_df <- generate_average_edge_df(edge_df)
+```
+
+
+
+
+```{r}
+generate_go_to_mirna <- function(mat_mirna_goa) {
+  go_groups <- mat_mirna_goa |>
+  group_by(GO_Term) |>
+  summarize(mirlist = list(mirbase_id))
+  return(go_groups)
+}
+
+```
+
+```{r}
+get_ancestors <- function(go_id, go_parents, acc = character()) {
+  parents <- go_parents[[go_id]]
+  if (is.null(parents) || length(parents) == 0) return(acc)
+  for (p in parents) {
+    if (!(p %in% acc)) {
+      acc <- c(acc, p)
+      acc <- get_ancestors(p, go_parents, acc)
+    }
+  }
+  return(unique(acc))
+}
+
+propogate_pathways <- function(go_to_mirna) {
+  pathways <- setNames(go_to_mirna$mirlist, go_to_mirna$GO_Term)
+  pathways_propagated <- pathways
+  for (go_id in names(pathways)) {
+    ancestors <- get_ancestors(go_id, go_parents)
+    for (anc_id in ancestors) {
+      if (! anc_id %in% names(pathways_propagated)) {
+        pathways_propagated[[anc_id]] <- character()
+      }
+      pathways_propagated[[anc_id]] <- unique(c(pathways_propagated[[anc_id]], pathways[[go_id]]))
+    }
+  }
+  return(pathways_propagated)
+}
+
+
+add_edges_to_pathway <- function(pathways, edge_df) {
+
+  edge_df$gene <- sub(".*_", "", edge_df$edge)
+  edge_df$gene_base <- sub("-.*$", "", edge_df$gene)
+  gene_to_edges <- split(edge_df$edge, edge_df$gene_base)
+  pathways_with_edges <- lapply(pathways, function(genes) {
+  unique(unlist(gene_to_edges[genes]))
+  })
+  return(pathways_with_edges)
+}
+
+
+
+```
+
+
+```{r}
+library(fgsea)
+
+proc_mat_mirna_goa <- preprocess_mat_mirna_goa(mat_mirna_goa)
+only_process_mat_mirna_goa <- proc_mat_mirna_goa |> filter(Annotation_Type == "P")
+
+real_edge_df <- edge_df |> filter(edge %in% paste0(motif$V1, "_", motif$V2))
+
+avg_gene_zscore <- generate_average_edge_df(edge_df)
+avg_gene_zscore_real_edges <- generate_average_edge_df(real_edge_df)
+
+
+go_to_mirna <- generate_go_to_mirna(proc_mat_mirna_goa)
+process_go_to_mirna <- generate_go_to_mirna(only_process_mat_mirna_goa)
+
+
+pathways <- propogate_pathways(go_to_mirna)
+process_pathways <- propogate_pathways(process_go_to_mirna)
+
+
+pathways_with_edges <- add_edges_to_pathway(pathways, edge_df)
+process_pathways_with_edges <- add_edges_to_pathway(process_pathways, edge_df)
+
+
+stats_raw_zscore <- setNames(edge_df$z_score_combined, edge_df$edge)
+real_edges_stats_raw_zscore <- setNames(real_edge_df$z_score_combined, real_edge_df$edge)
+# Saved as "../data/gsea_results_prop_pathways.rds"
+gsea_results_raw_zscore <- fgsea(pathways_with_edges, stats_raw_zscore)
+
+
+
+```
+
+```{r}
+library(fgsea)
+# real_edges_fgsea <- fgsea(pathways_with_edges, real_edges_stats_raw_zscore)
+# real_edges_and_process_fgsea <- fgsea(process_pathways_with_edges, real_edges_stats_raw_zscore)
+# 
+# real_edges_and_process_fgsea$description <- go_descr[real_edges_and_process_fgsea$pathway]
+
+
+process_fgsea <- fgsea(process_pathways_with_edges, stats_raw_zscore)
+
+```
+
+
+```{r}
+
+dprx_df <- edge_df |> filter(startsWith(edge, "DPRX"))
+
+dprx_pathways_with_edges <- add_edges_to_pathway(pathways, dprx_df)
+dprx_process_pathways_with_edges <- add_edges_to_pathway(process_pathways, dprx_df)
+dprx_zscore <- setNames(dprx_df$z_score_combined, dprx_df$edge)
+
+dprx_process_fgsea <- fgsea(dprx_process_pathways_with_edges, dprx_zscore)
+dprx_fgsea <- fgsea(dprx_pathways_with_edges, dprx_zscore)
+
+dprx_fgsea$description <- go_descr[dprx_fgsea$pathway]
+
+```
+
+
+```{r}
+stats_shuffled <- stats_raw_zscore
+names(stats_shuffled) <- sample(names(stats_raw_zscore))
+gsea_results_shuffled_raw_zscore <- fgsea(pathways_with_edges, stats_shuffled)
+
+# gsea_results_raw_zscore <- fgsea(pathways_with_edges, stats_raw_zscore)
+
+
+gsea_results_shuffled_raw_zscore <- readRDS("~/Documents/Glass_Lab/data/gsea_results_shuffled_raw_zscore.Rds") 
+
+gsea_results_raw_zscore <- readRDS("~/Documents/Glass_Lab/data/gsea_results_raw_zscore.rds") 
+
+
+```
+
+

@@ -1,0 +1,58 @@
+---
+title: "target_enrichment_gsea"
+output: html_document
+---
+
+```{r}
+edge_df <- read.csv("../data/all_merged_for_analysis.csv")
+targets <- read.csv("../data/miRDB_v6.0_prediction_result.txt",sep="",header=FALSE)
+```
+
+```{r}
+library(dplyr)
+targets <- targets[startsWith(targets$V1, "hsa"),]
+targets <- targets[targets$V3 > 80,]
+
+targets <- targets |>
+  mutate(mirna = V1,
+         target = V2,
+         score = V3) |>
+  select(mirna,target,score)
+
+targets <- targets |>
+  mutate(mirna = substr(mirna, 5, nchar(mirna))) |>
+  mutate(mirna = toupper(mirna)) |>
+  mutate(mirna = ifelse(endsWith(mirna, "-3P"), substr(mirna, 1, nchar(mirna) - 3), mirna)) |>
+  mutate(mirna = ifelse(endsWith(mirna, "-5P"), substr(mirna, 1, nchar(mirna) - 3), mirna)) |>
+  filter(!startsWith(mirna, "LET")) |>
+  mutate(mirna = substr(mirna, 5, nchar(mirna))) |>
+  mutate(mirna=paste0("MIR", mirna)) |>
+  filter(mirna %in% edge_df$Gene)
+
+```
+
+
+```{r}
+stats_raw_zscore <- setNames(edge_df$z_score_combined, edge_df$edge)
+gene_to_edges <- split(edge_df$edge, edge_df$Gene)
+pathways <- split(targets$mirna, targets$target)
+pathways_edges <- lapply(pathways, function(genes) {
+  unique(unlist(gene_to_edges[genes]))
+})
+```
+
+```{r}
+target_enrichment_gsea <- fgsea(pathways_edges, stats_raw_zscore)
+
+
+saveRDS(target_enrichment_gsea, "../data/target_enrichment_gsea.rds")
+```
+
+
+```{r}
+library(fgsea)
+dprx_scores <- edge_df[startsWith(edge_df$edge, "DPRX"),]$z_score_combined
+names(dprx_scores) <- edge_df[startsWith(edge_df$edge, "DPRX"),]$edge
+target_enrichment_gsea_dprx <- fgsea(pathways_edges, dprx_scores)
+```
+

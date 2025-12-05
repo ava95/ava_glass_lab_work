@@ -1,0 +1,87 @@
+---
+title: "deseq"
+output: html_document
+---
+
+```{r}
+library("DESeq2")
+```
+
+```{r}
+library(dplyr)
+pheno <- read.csv("../data/pheno_df.csv")
+pheno_filt <- pheno[(pheno$disease != "1-ILD") & (pheno$included == "yes"),]
+pheno_filt$disease_int <- ifelse(pheno_filt$disease == "2-COPD/Emphysema", 1, 0)
+countData = read.csv("../data/final_expr.txt", sep="")
+
+countData <- countData[colnames(countData) %in% pheno_filt$title]
+
+row.names(pheno_filt) <- pheno_filt$title
+
+pheno_filt <- pheno_filt[colnames(countData), ]
+
+countData <- as.data.frame(t(countData))
+
+countData$disease_int <- pheno_filt$disease_int
+countData$fev1.fvc.ratio <- as.numeric(pheno_filt$fev1.fvc.ratio)
+
+countData <- countData |>
+  filter(!is.na(fev1.fvc.ratio))
+
+```
+
+```{r}
+
+gene_cols <- setdiff(names(countData), "fev1.fvc.ratio")
+X <- as.matrix(countData[, gene_cols])                    
+fev1 <- countData$fev1.fvc.ratio                          
+X <- t(X)        
+
+results <- apply(X, 1, function(expr) {
+    fit <- lm(expr ~ fev1)
+    summary(fit)$coefficients[2, ]  
+})
+results_df <- as.data.frame(t(results))
+
+```
+
+```{r}
+mean_case <- colMeans(countData[countData$disease_int == 1,])
+mean_ctrl <- colMeans(countData[countData$disease_int == 0,])
+
+lfc <- log2(mean_ctrl/mean_case)
+lfc <- sort(lfc, decreasing=TRUE)
+
+lfc
+```
+
+
+```{r}
+library(glmnet)
+
+X <- as.matrix(countData[ , setdiff(names(countData), "fev1.fvc.ratio") ])
+y <- countData$fev1.fvc.ratio
+
+fit_lasso <- cv.glmnet(X, y, alpha=1)
+plot(fit_lasso)
+
+coef(fit, s = "lambda.min") 
+
+```
+
+```{r}
+countDataRounded <- round(countData)
+```
+
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = countDataRounded,
+                             colData = pheno_filt,
+                             design = ~ condition)
+```
+
+
+```{r}
+write.csv(results_df, "../data/expr_regr_fev1fvc.csv")
+```
+

@@ -1,0 +1,27 @@
+---
+title: "lioness_2"
+format: html
+---
+
+```{r}
+final_expr_full <- read.csv("~/Documents/Glass_Lab/data/final_expr.txt", sep = "\t")
+```
+
+
+
+```{r}
+ncols <- ncol(final_expr_full)
+big_network <- cor(t(final_expr_full))
+
+
+results <- lapply(seq(1, ncols), function(i) {
+  ncols * big_network - (ncols - 1) * cor(t(final_expr_full[,-i]))
+})
+
+names(results) <- colnames(final_expr_full)
+```
+
+```{r}
+saveRDS(results, "~/Documents/Glass_Lab/data/filtered_results.rds")
+```
+

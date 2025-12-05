@@ -1,0 +1,587 @@
+---
+title: "run_panda"
+format: html
+---
+
+```{r, quietly=TRUE}
+# library(GEOquery)
+library(dplyr)
+library(reticulate)
+library(netZooR)
+library(biomaRt)
+library(tidyverse)
+library(Biostrings)
+library(data.table)
+
+
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("Biostrings")
+
+
+
+
+```
+
+
+```{r}
+# geo_data <- readRDS("~/Documents/Glass_Lab/geo_data.rds")
+# results <- readRDS("~/Documents/Glass_Lab/results.RDS")
+pheno_df <- readRDS("~/Documents/Glass_Lab/data/pheno_df.rds")
+# comp_df <- readRDS("~/Documents/Glass_Lab/comp_df.rds")
+# comp_df_fev <- readRDS("~/Documents/Glass_Lab/comp_df_fev.rds")
+# comp_df_fev_subset <- readRDS("~/Documents/Glass_Lab/comp_df_fev_subset.rds")
+# comp_df_fev_good <- readRDS("~/Documents/Glass_Lab/comp_df_fev_good.rds")
+input_df <- readRDS("~/Documents/Glass_Lab/input_df.rds")
+gencode_mirna_subset <- readRDS("~/Documents/Glass_Lab/gencode_mirna_subset.rds")
+mirna_to_ensembl <- readRDS("~/Documents/Glass_Lab/mirna_to_ensembl.rds")
+```
+
+
+```{r}
+write.csv(pheno_df, "~/Documents/Glass_Lab/data/pheno_df.csv")
+# gencode <- read.csv("~/Documents/Glass_Lab/gencode.v39.annotation.gtf", header = FALSE)
+# 
+# gencode$mirna <- grepl("miRNA", gencode$V1)
+# 
+# gencode_mirna_subset <- gencode[gencode$mirna == TRUE,]
+# 
+# saveRDS(gencode_mirna_subset, "~/Documents/Glass_Lab/gencode_mirna_subset.rds")
+```
+
+```{r}
+# Generate names for precursor and mature miRNA transcripts
+input_df$names <- rownames(input_df)
+  
+input_df <- input_df |>
+  mutate(precursor = sapply(strsplit(names, "_"), `[`, 1)) |>
+  mutate(mature =  sapply(strsplit(names, "_"), `[`, 2))
+
+# For each precursor transcript in input_df, get the total expression
+# of all its mature transcripts
+input_df_precursors <- input_df |>
+  group_by(precursor) |>
+  summarise(across(where(is.numeric), sum, na.rm = TRUE)) 
+
+input_df_precursors <- as.data.frame(input_df_precursors)
+rownames(input_df_precursors) <- input_df_precursors$precursor
+
+# Remove rows that have expression in less than 90% of 
+input_df_precursors <- input_df_precursors[rowSums(input_df_precursors != 0) / ncol(input_df_precursors) >= .9, ]
+```
+
+
+```{r}
+# ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
+# 
+# mirna_to_ensembl <- getBM(attributes = c("ensembl_gene_id", "hgnc_id", 
+#                  "mirbase_accession", "mirbase_id"), 
+#                  filters = "mirbase_accession", 
+#                  values = input_df$precursor, 
+#                  mart = ensembl)
+#                   
+# 
+# input_df_precursors$mirbase_accession <- input_df_precursors$precursor
+```
+
+```{r}
+# Filter out miRNAs that are in mirna_to_ensembl but not in motif
+# mirna_to_ensembl_filtered <- mirna_to_ensembl |>
+#   filter(ensembl_gene_id %in% motif$ensembl_gene_id)
+# 
+
+```
+
+```{r}
+input_df_precursors$mirbase_accession <- rownames(input_df_precursors)
+```
+
+```{r}
+# long_df <- input_df_precursors |>
+#   pivot_longer(
+#     cols = -mirbase_accession,
+#     names_to = "sample",
+#     values_to = "expression"
+#   )
+# 
+# long_df<- long_df |>
+#   left_join(mirna_to_ensembl_filtered, by = "mirbase_accession")
+# 
+# long_df <- long_df |>
+#   group_by(mirbase_accession, sample) |>
+#   mutate(
+#     n_ensembl_ids = n_distinct(ensembl_gene_id, na.rm = TRUE),
+#     divided_expression = expression / n_ensembl_ids
+#   ) |>
+#   ungroup()
+# 
+# long_df <- long_df |>
+#   group_by(ensembl_gene_id, sample) |>
+#   summarize(expression = sum(expression, na.rm = TRUE), .groups = "drop")
+# 
+# ensembl_expr <- long_df |>
+#   filter(!is.na(ensembl_gene_id)) |>
+#   pivot_wider(
+#     names_from = sample,
+#     values_from = expression
+#   ) |>
+#   column_to_rownames("ensembl_gene_id")
+
+
+```
+
+
+
+```{r}
+# library(tidyverse)
+# motif <- read.csv("~/Documents/Glass_Lab/MotifPriorGencode_p5.txt", sep = "", header=FALSE)
+# motif <- motif |>
+#   mutate(TF = V1,
+#          ensembl_gene_id = V2,
+#          score = V3) |>
+#   dplyr::select(TF, ensembl_gene_id, score)
+# 
+# saveRDS(motif, "~/Documents/Glass_Lab/motif.rds")
+# saveRDS(mirna_to_ensembl, "~/Documents/Glass_Lab/mirna_to_ensembl.rds")
+```
+
+
+
+
+```{r}
+
+# Read miRNA.dat file
+lines <- readLines("miRNA.dat")
+
+# Initialize storage
+mirna_records <- list()
+current_record <- list()
+sequence_lines <- character()
+in_sequence <- FALSE
+
+for (i in seq_along(lines)) {
+  line <- lines[i]
+  line_type <- substr(line, 1, 2)
+  content <- trimws(substr(line, 6, nchar(line)))
+  
+  if (line_type == "ID") {
+    # Start new record
+    if (length(current_record) > 0) {
+      current_record$sequence <- paste(sequence_lines, collapse = "")
+      mirna_records <- append(mirna_records, list(current_record))
+    }
+    
+    # Reset for new record
+    current_record <- list()
+    sequence_lines <- character()
+    in_sequence <- FALSE
+    
+    # Parse ID line:
+    id_parts <- strsplit(content, "\\s+")[[1]]
+    current_record$mirna_id <- id_parts[1]
+    current_record$organism_code <- id_parts[4]
+    current_record$length <- as.numeric(gsub("\\D", "", id_parts[5]))
+    
+  } else if (line_type == "AC") {
+    # Accession number
+    current_record$accession <- gsub(";", "", content)
+    
+  } else if (line_type == "DE") {
+    # Description
+    current_record$description <- content
+  
+    
+  } else if (line_type == "//") {
+    # End of record
+    current_record$sequence <- paste(sequence_lines, collapse = "")
+    mirna_records <- append(mirna_records, list(current_record))
+    current_record <- list()
+
+  }
+}
+
+# Convert to dataframe
+mirna_df <- rbindlist(mirna_records, fill = TRUE)
+mirna_df <- as.data.frame(mirna_df)
+
+head(mirna_df)
+dim(mirna_df)
+```
+
+```{r}
+mirna_df_subset <- mirna_df |>
+  filter(organism_code == "HSA;") |>
+  mutate(mirbase_accession = accession) |>
+  dplyr::select(mirna_id, mirbase_accession)
+```
+
+
+```{r}
+
+# Combine input_df_precursors with the mirna data
+input_df_mirna <- left_join(input_df_precursors, mirna_df_subset, by="mirbase_accession")
+
+input_df_mirna <- input_df_mirna |>
+  mutate(mirna_real_id = toupper(substr(mirna_id, 5, nchar(mirna_id))))
+
+ensembl_expr <- input_df_mirna
+ensembl_expr <- ensembl_expr[!is.na(ensembl_expr$mirna_real_id), ]
+rownames(ensembl_expr) <- ensembl_expr$mirna_real_id
+ensembl_expr <- ensembl_expr |>
+  dplyr::select(-mirbase_accession, -mirna_id, -mirna_real_id)
+
+rownames(ensembl_expr) <- sub("-", "", rownames(ensembl_expr))
+
+
+```
+
+
+```{r}
+# Establish lists of which samples are connected with diseases
+case_tissue_list <- pheno_df[which(pheno_df$disease == "2-COPD/Emphysema"),]$title
+ctrl_tissue_list <- pheno_df[which(pheno_df$disease == "3-Control"),]$title
+
+ensembl_expr_case <- ensembl_expr[,which(colnames(ensembl_expr) %in% case_tissue_list)]
+ensembl_expr_ctrl <- ensembl_expr[,which(colnames(ensembl_expr) %in% ctrl_tissue_list)]
+```
+
+```{r}
+motif <- read.csv("MotifPriorMIRs.txt", sep="", header=FALSE)
+
+motif_filtered <- motif |>
+  filter(V2 %in% rownames(ensembl_expr))
+
+df <- read.csv("~/Documents/Glass_Lab/final_expr.txt", sep ="\t")
+
+final_expr_filtered <- ensembl_expr[rownames(ensembl_expr) %in% motif_filtered$V2, ]
+
+```
+
+
+
+```{r}
+
+write.table(final_expr_filtered, file = "~/Documents/Glass_Lab/final_expr.txt", sep = "\t", col.names = FALSE, row.names = TRUE, quote = FALSE)
+write.table(motif_filtered, file = "~/Documents/Glass_Lab/motif.txt", sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
+
+write.table(ensembl_expr_case, file = "~/Documents/Glass_Lab/final_expr_case.txt", sep = "\t", col.names = FALSE, row.names = TRUE, quote = FALSE)
+write.table(ensembl_expr_ctrl, file = "~/Documents/Glass_Lab/final_expr_ctrl.txt", sep = "\t", col.names = FALSE, row.names = TRUE, quote = FALSE)
+
+
+panda_full <- pandaPy(expr_file = "~/Documents/Glass_Lab/final_expr.txt", motif_file = "motif.txt")
+panda_case <- pandaPy(expr_file = "~/Documents/Glass_Lab/final_expr_case.txt", motif_file = "MotifPriorMIRs.txt")
+panda_ctrl <- pandaPy(expr_file = "~/Documents/Glass_Lab/final_expr_ctrl.txt", motif_file = "MotifPriorMIRs.txt")
+
+test_df <- final_expr_filtered[1:10,1:10]
+write.table(test_df, file = "~/Documents/Glass_Lab/test_df.txt", sep = "\t", col.names = FALSE, row.names = TRUE, quote = FALSE)
+
+
+lionessPy(expr_file = "~/Documents/Glass_Lab/final_expr.txt", motif_file = "motif.txt")
+```
+
+
+```{r}
+### LIONESS ###
+
+
+# lionessPy(expr_file = "~/Documents/Glass_Lab/test_df.txt", motif_file = "motif.txt")
+# lionessPy(test_df, motif_filtered)
+
+# test_df <- final_expr_filtered[1:10,1:10]
+# 
+# fullnet <- panda_full
+# return(lapply(), function(i) {
+#   write.table(expr[,-1], file = "~/Documents/Glass_Lab/final_expr_minus_i.txt", sep = "\t", col.names = FALSE, row.names = TRUE, quote = FALSE)
+#   print(paste("Computing network for sample ", i))
+#   N * fullnet$panda - (N - 1) * pandaPy(expr_file = "~/Documents/Glass_Lab/final_expr_minus_i.txt", motif_file = "motif.txt")$panda
+# }, mc.cores = ncores))
+
+ncols <- ncol(panda_full$indegree)
+big_network <- panda_full$indegree
+
+
+results <- lapply(seq(1, ncols), function(i) {
+  write.table(final_expr_filtered[,-i], file = "~/Documents/Glass_Lab/final_expr_minus_i.txt", sep = "\t", col.names = FALSE, row.names = TRUE, quote = FALSE)
+  ncols * big_network - (ncols - 1) * pandaPy(expr_file = "~/Documents/Glass_Lab/final_expr_minus_i.txt", motif_file = "motif.txt")$panda
+})
+# 
+names(results) <- colnames(test_df)
+```
+```{r}
+panda.py
+```
+
+
+```{r}
+### PANDA ### 
+panda2 <- function (motif, expr = NULL, ppi = NULL, alpha = 0.1, hamming = 0.01, 
+    iter = NA, output = c("regulatory", "coexpression", "cooperative"), 
+    zScale = TRUE, progress = FALSE, randomize = c("None", "within.gene", 
+        "by.gene"), cor.method = "pearson", scale.by.present = FALSE, 
+    edgelist = FALSE, remove.missing.ppi = FALSE, remove.missing.motif = FALSE, 
+    remove.missing.genes = FALSE, mode = "union") 
+  
+  {
+    randomize <- match.arg(randomize)
+    if (progress) 
+        print("Initializing and validating")
+    if (class(expr) == "ExpressionSet") 
+        expr <- assayData(expr)[["exprs"]]
+    if (is.null(expr)) {
+        num.conditions <- 0
+        if (randomize != "None") {
+            warning("Randomization ignored because gene expression is not used.")
+            randomize <- "None"
+        }
+    }
+    else {
+        if (mode == "legacy") {
+            if (remove.missing.genes) {
+                n <- nrow(expr)
+                expr <- expr[which(rownames(expr) %in% motif[, 
+                  2]), ]
+                message(sprintf("%s genes removed that were not present in motif", 
+                  n - nrow(expr)))
+            }
+            if (remove.missing.motif) {
+                n <- nrow(motif)
+                motif <- motif[which(motif[, 2] %in% rownames(expr)), 
+                  ]
+                message(sprintf("%s motif edges removed that targeted genes missing in expression data", 
+                  n - nrow(motif)))
+            }
+            expr <- expr[order(rownames(expr)), ]
+        }
+        else if (mode == "union") {
+            gene.names = unique(union(rownames(expr), unique(motif[, 
+                2])))
+            tf.names = unique(union(unique(ppi[, 1]), unique(motif[, 
+                1])))
+            num.TFs <- length(tf.names)
+            num.genes <- length(gene.names)
+            expr1 = as.data.frame(matrix(0, num.genes, ncol(expr)))
+            rownames(expr1) = gene.names
+            expr1[which(gene.names %in% rownames(expr)), ] = expr[]
+            expr = expr1
+            tfCoopNetwork <- matrix(0, num.TFs, num.TFs)
+            colnames(tfCoopNetwork) = tf.names
+            rownames(tfCoopNetwork) = tf.names
+            Idx1 <- match(ppi[, 1], tf.names)
+            Idx2 <- match(ppi[, 2], tf.names)
+            Idx <- (Idx2 - 1) * num.TFs + Idx1
+            tfCoopNetwork[Idx] <- ppi[, 3]
+            Idx <- (Idx1 - 1) * num.TFs + Idx2
+            tfCoopNetwork[Idx] <- ppi[, 3]
+            regulatoryNetwork = matrix(0, num.TFs, num.genes)
+            colnames(regulatoryNetwork) = gene.names
+            rownames(regulatoryNetwork) = tf.names
+            Idx1 = match(motif[, 1], tf.names)
+            Idx2 = match(motif[, 2], gene.names)
+            Idx = (Idx2 - 1) * num.TFs + Idx1
+            regulatoryNetwork[Idx] = motif[, 3]
+        }
+        else if (mode == "intersection") {
+            gene.names = unique(intersect(rownames(expr), unique(motif[, 
+                2])))
+            tf.names = unique(intersect(unique(ppi[, 1]), unique(motif[, 
+                1])))
+            num.TFs <- length(tf.names)
+            num.genes <- length(gene.names)
+            expr1 = as.data.frame(matrix(0, num.genes, ncol(expr)))
+            rownames(expr1) = gene.names
+            interGeneNames = gene.names[which(gene.names %in% 
+                rownames(expr))]
+            expr1[interGeneNames, ] = expr[interGeneNames, ]
+            expr = expr1
+            tfCoopNetwork <- matrix(0, num.TFs, num.TFs)
+            colnames(tfCoopNetwork) = tf.names
+            rownames(tfCoopNetwork) = tf.names
+            Idx1 <- match(ppi[, 1], tf.names)
+            Idx2 <- match(ppi[, 2], tf.names)
+            Idx <- (Idx2 - 1) * num.TFs + Idx1
+            indIdx = !is.na(Idx)
+            Idx = Idx[indIdx]
+            tfCoopNetwork[Idx] <- ppi[indIdx, 3]
+            Idx <- (Idx1 - 1) * num.TFs + Idx2
+            indIdx = !is.na(Idx)
+            Idx = Idx[indIdx]
+            tfCoopNetwork[Idx] <- ppi[indIdx, 3]
+            regulatoryNetwork = matrix(0, num.TFs, num.genes)
+            colnames(regulatoryNetwork) = gene.names
+            rownames(regulatoryNetwork) = tf.names
+            Idx1 = match(motif[, 1], tf.names)
+            Idx2 = match(motif[, 2], gene.names)
+            Idx = (Idx2 - 1) * num.TFs + Idx1
+            indIdx = !is.na(Idx)
+            Idx = Idx[indIdx]
+            regulatoryNetwork[Idx] = motif[indIdx, 3]
+        }
+        num.conditions <- ncol(expr)
+        if (randomize == "within.gene") {
+            expr <- t(apply(expr, 1, sample))
+            if (progress) 
+                print("Randomizing by reordering each gene's expression")
+        }
+        else if (randomize == "by.gene") {
+            rownames(expr) <- sample(rownames(expr))
+            expr <- expr[order(rownames(expr)), ]
+            if (progress) 
+                print("Randomizing by reordering each gene labels")
+        }
+    }
+    if (mode == "legacy") {
+        tf.names <- sort(unique(motif[, 1]))
+        gene.names <- sort(unique(rownames(expr)))
+        num.TFs <- length(tf.names)
+        num.genes <- length(gene.names)
+    }
+    if (num.genes == 0) {
+        stop("Error validating data.  No matched genes.\n  Please ensure that gene names in expression data match gene names in motif data")
+    }
+    if (num.conditions == 0) {
+        warning("No expression data given.  PANDA will run based on an identity co-regulation matrix")
+        geneCoreg <- diag(num.genes)
+    }
+    else if (num.conditions < 3) {
+        warning("Not enough expression conditions detected to calculate correlation. Co-regulation network will be initialized to an identity matrix.")
+        geneCoreg <- diag(num.genes)
+    }
+    else {
+        if (scale.by.present) {
+            num.positive = (expr > 0) %*% t((expr > 0))
+            geneCoreg <- cor(t(expr), method = cor.method, use = "pairwise.complete.obs") * 
+                (num.positive/num.conditions)
+        }
+        else {
+            geneCoreg <- cor(t(expr), method = cor.method, use = "pairwise.complete.obs")
+        }
+        if (progress) 
+            print("Verified sufficient samples")
+    }
+    if (any(is.na(geneCoreg))) {
+        diag(geneCoreg) = 1
+        geneCoreg[is.na(geneCoreg)] = 0
+    }
+    if (any(duplicated(motif))) {
+        warning("Duplicate edges have been found in the motif data. Weights will be summed.")
+        motif <- aggregate(motif[, 3], by = list(motif[, 1], 
+            motif[, 2]), FUN = sum)
+    }
+    if (mode == "legacy") {
+        Idx1 = match(motif[, 1], tf.names)
+        Idx2 = match(motif[, 2], gene.names)
+        Idx = (Idx2 - 1) * num.TFs + Idx1
+        regulatoryNetwork = matrix(data = 0, num.TFs, num.genes)
+        regulatoryNetwork[Idx] = motif[, 3]
+        colnames(regulatoryNetwork) <- gene.names
+        rownames(regulatoryNetwork) <- tf.names
+        tfCoopNetwork <- diag(num.TFs)
+        if (!is.null(ppi)) {
+            if (any(duplicated(ppi))) {
+                warning("Duplicate edges have been found in the PPI data. Weights will be summed.")
+                ppi <- aggregate(ppi[, 3], by = list(ppi[, 1], 
+                  ppi[, 2]), FUN = sum)
+            }
+            if (remove.missing.ppi) {
+                n <- nrow(ppi)
+                ppi <- ppi[which(ppi[, 1] %in% tf.names & ppi[, 
+                  2] %in% tf.names), ]
+                message(sprintf("%s PPI edges removed that were not present in motif", 
+                  n - nrow(ppi)))
+            }
+            Idx1 <- match(ppi[, 1], tf.names)
+            Idx2 <- match(ppi[, 2], tf.names)
+            Idx <- (Idx2 - 1) * num.TFs + Idx1
+            tfCoopNetwork[Idx] <- ppi[, 3]
+            Idx <- (Idx1 - 1) * num.TFs + Idx2
+            tfCoopNetwork[Idx] <- ppi[, 3]
+        }
+        colnames(tfCoopNetwork) <- tf.names
+        rownames(tfCoopNetwork) <- tf.names
+    }
+    tic = proc.time()[3]
+    if (progress) 
+        print("Normalizing networks...")
+    regulatoryNetwork = pandaR:::normalizeNetwork(regulatoryNetwork)
+    tfCoopNetwork = pandaR:::normalizeNetwork(tfCoopNetwork)
+    geneCoreg = pandaR:::normalizeNetwork(geneCoreg)
+    if (progress) 
+        print("Learning Network...")
+    minusAlpha = 1 - alpha
+    step = 0
+    hamming_cur = 1
+    if (progress) 
+        print("Using tanimoto similarity")
+    while (hamming_cur > hamming) {
+        if ((!is.na(iter)) && step >= iter) {
+            print(paste("Reached maximum iterations, iter =", 
+                iter), sep = "")
+            break
+        }
+        Responsibility = pandaR:::tanimoto(tfCoopNetwork, regulatoryNetwork)
+        Availability = pandaR:::tanimoto(regulatoryNetwork, geneCoreg)
+        RA = 0.5 * (Responsibility + Availability)
+        hamming_cur = sum(abs(regulatoryNetwork - RA))/(num.TFs * 
+            num.genes)
+        regulatoryNetwork = minusAlpha * regulatoryNetwork + 
+            alpha * RA
+        ppi = pandaR:::tanimoto(regulatoryNetwork, t(regulatoryNetwork))
+        ppi = pandaR:::update.diagonal(ppi, num.TFs, alpha, step)
+        tfCoopNetwork = minusAlpha * tfCoopNetwork + alpha * 
+            ppi
+        CoReg2 = pandaR:::tanimoto(t(regulatoryNetwork), regulatoryNetwork)
+        CoReg2 = pandaR:::update.diagonal(CoReg2, num.genes, alpha, step)
+        geneCoreg = minusAlpha * geneCoreg + alpha * CoReg2
+        if (progress) 
+            message("Iteration", step, ": hamming distance =", 
+                round(hamming_cur, 5))
+        step = step + 1
+    }
+    toc = proc.time()[3] - tic
+    if (progress) 
+        message("Successfully ran PANDA on ", num.genes, " Genes and ", 
+            num.TFs, " TFs.\nTime elapsed:", round(toc, 2), "seconds.")
+    prepResult(zScale, output, regulatoryNetwork, geneCoreg, 
+        tfCoopNetwork, edgelist, motif)
+}
+
+```
+
+
+
+
+
+Try it both ways and compare?
+
+Can use Panda in LIONESS, but LIONESS emphasizes outliers
+
+LIONESS first, correlation network, apply PANDA to mitigate outlier issue
+
+Play around with it!
+
+Biology? Diff biology?
+
+Linear regression model with FEV after the fact
+- Go to the base coding! 
+- Implement regression model and start with that 
+- Categorical variables vs continuous variables (pkyrs)
+
+Motif prior & assumptions
+- Which original region had a set 
+- Merge promoters -- we find 4 are actually higher ranked, figure out miRNA was active 
+- Dig into original data in message passing -- see if there's pairs close to 1
+  - Evaluate in motif prior -- Jakart index, see if there's identical incoming edges
+  - Could cause issues in the network building
+  - Could have a real impact!
+
+Integrating TF data
+- Lots of genes!! TF info gets masked by gene expression
+
+We have RNAseq data for some people
+- Could go in PPI?
+
+Motif -- when would it be something other than 1?
+- 1 vs 0 dominates, but there's no reason not to have a weight!
+- Can play around
+
+Camilla 
